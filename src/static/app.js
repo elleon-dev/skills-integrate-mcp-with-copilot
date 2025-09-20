@@ -1,8 +1,53 @@
+let teacherCredentials = null;
+let teacherEmail = null;
+
 document.addEventListener("DOMContentLoaded", () => {
   const activitiesList = document.getElementById("activities-list");
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const loginBtn = document.getElementById("loginBtn");
+  const teacherInfo = document.getElementById("teacherInfo");
+  const teacherName = document.getElementById("teacherName");
+
+  // Function to handle login
+  async function handleLogin() {
+    const username = prompt("Teacher Username:");
+    if (!username) return;
+    
+    const password = prompt("Password:");
+    if (!password) return;
+
+    // Create Basic Auth header
+    const credentials = btoa(`${username}:${password}`);
+    
+    try {
+      // Test credentials with a signup attempt (will be rejected if invalid)
+      const testResponse = await fetch("/activities/Chess Club/signup?email=test@test.com", {
+        method: "POST",
+        headers: {
+          "Authorization": `Basic ${credentials}`
+        }
+      });
+
+      if (testResponse.ok) {
+        teacherCredentials = credentials;
+        teacherEmail = "test@test.com"; // Replace with actual email from backend response
+        loginBtn.style.display = "none";
+        teacherInfo.classList.remove("hidden");
+        teacherName.textContent = username;
+        messageDiv.textContent = "Logged in successfully";
+        messageDiv.className = "success";
+      } else {
+        messageDiv.textContent = "Invalid credentials";
+        messageDiv.className = "error";
+      }
+    } catch (error) {
+      messageDiv.textContent = "Login failed";
+      messageDiv.className = "error";
+    }
+    messageDiv.classList.remove("hidden");
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -10,43 +55,44 @@ document.addEventListener("DOMContentLoaded", () => {
       const response = await fetch("/activities");
       const activities = await response.json();
 
-      // Clear loading message
+      // Clear loading message and select options
       activitiesList.innerHTML = "";
+      activitySelect.innerHTML = '<option value="">-- Select an activity --</option>';
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
+        const isJoined = details.participants.includes(teacherEmail);
         const activityCard = document.createElement("div");
-        activityCard.className = "activity-card";
-
-        const spotsLeft =
-          details.max_participants - details.participants.length;
-
-        // Create participants HTML with delete icons instead of bullet points
-        const participantsHTML =
-          details.participants.length > 0
-            ? `<div class="participants-section">
-              <h5>Participants:</h5>
-              <ul class="participants-list">
-                ${details.participants
-                  .map(
-                    (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
-                  )
-                  .join("")}
-              </ul>
-            </div>`
-            : `<p><em>No participants yet</em></p>`;
-
-        activityCard.innerHTML = `
-          <h4>${name}</h4>
-          <p>${details.description}</p>
-          <p><strong>Schedule:</strong> ${details.schedule}</p>
-          <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
-          <div class="participants-container">
-            ${participantsHTML}
+        activityCard.classList.add("activity-card");
+        activityCard.id = `activity-${name}`;
+        
+        const activityHTML = `
+          <div class="activity-header">
+            <h3>${name}</h3>
+            ${teacherCredentials ? 
+              `<button class="delete-activity-btn" data-activity="${name}">Delete Activity</button>` 
+              : ''}
           </div>
+          <p>${details.description}</p>
+          <div class="participants-section">
+            <h5>Participants:</h5>
+            <ul class="participants-list">
+              ${details.participants.map(email => 
+                `<li>
+                  <span class="participant-email">${email}</span>
+                  ${teacherCredentials ? 
+                    `<button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button>` 
+                    : ''}
+                </li>`
+              ).join("")}
+            </ul>
+          </div>
+          <button class="join-btn ${isJoined ? 'joined' : ''}" data-activity="${name}">
+            ${isJoined ? 'Leave' : 'Join'}
+          </button>
         `;
-
+        
+        activityCard.innerHTML = activityHTML;
         activitiesList.appendChild(activityCard);
 
         // Add option to select dropdown
@@ -56,9 +102,100 @@ document.addEventListener("DOMContentLoaded", () => {
         activitySelect.appendChild(option);
       });
 
-      // Add event listeners to delete buttons
-      document.querySelectorAll(".delete-btn").forEach((button) => {
-        button.addEventListener("click", handleUnregister);
+      // Add event listeners to all buttons
+      document.querySelectorAll(".delete-btn, .delete-activity-btn, .join-btn").forEach((button) => {
+        button.addEventListener("click", async (e) => {
+          if (e.target.classList.contains("join-btn")) {
+            const activityName = e.target.dataset.activity;
+            const isJoined = e.target.classList.contains("joined");
+
+            try {
+              const response = await fetch(
+                `/activities/${encodeURIComponent(activityName)}/${isJoined ? 'unregister' : 'signup'}?email=${encodeURIComponent(teacherEmail)}`,
+                {
+                  method: isJoined ? "DELETE" : "POST",
+                }
+              );
+              
+              if (response.ok) {
+                fetchActivities();
+              } else {
+                const result = await response.json();
+                messageDiv.textContent = result.detail || "An error occurred";
+                messageDiv.className = "error";
+                messageDiv.classList.remove("hidden");
+              }
+            } catch (error) {
+              console.error("Error:", error);
+              messageDiv.textContent = "An error occurred. Please try again.";
+              messageDiv.className = "error";
+              messageDiv.classList.remove("hidden");
+            }
+          } else if (e.target.classList.contains("delete-btn")) {
+            const activityName = e.target.dataset.activity;
+            const email = e.target.dataset.email;
+            
+            try {
+              const response = await fetch(
+                `/activities/${encodeURIComponent(activityName)}/unregister?email=${encodeURIComponent(email)}`,
+                {
+                  method: "DELETE",
+                  headers: {
+                    'Authorization': `Basic ${teacherCredentials}`
+                  }
+                }
+              );
+              
+              if (response.ok) {
+                fetchActivities();
+              } else {
+                const result = await response.json();
+                messageDiv.textContent = result.detail || "An error occurred";
+                messageDiv.className = "error";
+                messageDiv.classList.remove("hidden");
+              }
+            } catch (error) {
+              console.error("Error:", error);
+              messageDiv.textContent = "An error occurred while removing the participant.";
+              messageDiv.className = "error";
+              messageDiv.classList.remove("hidden");
+            }
+          } else if (e.target.classList.contains("delete-activity-btn")) {
+            const activityName = e.target.dataset.activity;
+            
+            if (confirm(`Are you sure you want to delete the activity "${activityName}"?`)) {
+              try {
+                const response = await fetch(`/activities/${encodeURIComponent(activityName)}`, {
+                  method: 'DELETE',
+                  headers: {
+                    'Authorization': `Basic ${teacherCredentials}`
+                  }
+                });
+                
+                if (response.ok) {
+                  fetchActivities();
+                } else {
+                  const result = await response.json();
+                  messageDiv.textContent = result.detail || "An error occurred";
+                  messageDiv.className = "error";
+                  messageDiv.classList.remove("hidden");
+                }
+              } catch (error) {
+                console.error("Error:", error);
+                messageDiv.textContent = "An error occurred while deleting the activity.";
+                messageDiv.className = "error";
+                messageDiv.classList.remove("hidden");
+              }
+            }
+          }
+          
+          // Hide error messages after 5 seconds
+          if (messageDiv.classList.contains("error")) {
+            setTimeout(() => {
+              messageDiv.classList.add("hidden");
+            }, 5000);
+          }
+        });
       });
     } catch (error) {
       activitiesList.innerHTML =
